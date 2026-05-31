@@ -16,60 +16,45 @@ export default function AddBook() {
 
   const startScanner = async () => {
     setScannerError(null)
+    setScannerActive(true)
+    // Small delay so the #qr-reader div is in the DOM
+    await new Promise(resolve => setTimeout(resolve, 50))
     try {
-      const { Html5QrcodeScanner } = await import('html5-qrcode')
-      setScannerActive(true)
-
-      // Wait for DOM to render the container
-      await new Promise(resolve => setTimeout(resolve, 100))
-
-      const scanner = new Html5QrcodeScanner(
-        'qr-reader',
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 150 },
-          formatsToSupport: [
-            // EAN_13 = 5, EAN_8 = 6, UPC_A = 7, UPC_E = 8, CODE_128 = 1
-            1, 5, 6, 7, 8
-          ],
-        },
-        false
-      )
-
-      scanner.render(
+      const { Html5Qrcode } = await import('html5-qrcode')
+      const qrCode = new Html5Qrcode('qr-reader')
+      html5QrCodeRef.current = qrCode
+      await qrCode.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 120 } },
         (decodedText) => {
-          // Success
           const cleaned = decodedText.replace(/[^0-9X]/gi, '')
           setIsbn(cleaned)
-          scanner.clear().catch(() => {})
-          setScannerActive(false)
-          html5QrCodeRef.current = null
+          stopScanner()
         },
-        (err) => {
-          // Per-frame error — ignore silently
-        }
+        () => {}
       )
-
-      html5QrCodeRef.current = scanner
     } catch (err) {
-      setScannerError('Could not start camera: ' + err.message)
+      setScannerError('Could not open camera: ' + (err?.message || err?.toString() || 'permission denied or camera unavailable'))
       setScannerActive(false)
+      html5QrCodeRef.current = null
     }
   }
 
-  const stopScanner = () => {
+  const stopScanner = async () => {
     if (html5QrCodeRef.current) {
-      html5QrCodeRef.current.clear().catch(() => {})
+      try {
+        await html5QrCodeRef.current.stop()
+        html5QrCodeRef.current.clear()
+      } catch {}
       html5QrCodeRef.current = null
     }
     setScannerActive(false)
   }
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (html5QrCodeRef.current) {
-        html5QrCodeRef.current.clear().catch(() => {})
+        html5QrCodeRef.current.stop().catch(() => {})
       }
     }
   }, [])
@@ -103,7 +88,7 @@ export default function AddBook() {
         isbn: cleanIsbn,
         title: bookData.title || 'Unknown Title',
         author: bookData.authors?.map(a => a.name).join(', ') || null,
-        cover_url: `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`,
+        cover_url: bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || null,
         publisher: bookData.publishers?.map(p => p.name).join(', ') || null,
         year: bookData.publish_date || null,
       })

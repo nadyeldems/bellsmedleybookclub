@@ -52,6 +52,12 @@ export default function BookCard({ book, index = 0 }) {
             src={book.cover_url}
             alt={`Cover of ${book.title}`}
             className="w-full h-full object-cover"
+            onLoad={(e) => {
+              if (e.currentTarget.naturalWidth <= 1) {
+                e.currentTarget.style.display = 'none'
+                e.currentTarget.nextSibling.style.display = 'flex'
+              }
+            }}
             onError={(e) => {
               e.currentTarget.style.display = 'none'
               e.currentTarget.nextSibling.style.display = 'flex'

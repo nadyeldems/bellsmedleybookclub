@@ -82,7 +82,7 @@ export async function onRequest(context) {
 
       const title = bookData.title || 'Unknown Title';
       const author = bookData.authors?.map(a => a.name).join(', ') || null;
-      const cover_url = `https://covers.openlibrary.org/b/isbn/${cleanIsbn}-L.jpg`;
+      const cover_url = bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || null;
       const description = bookData.excerpts?.[0]?.text || bookData.notes || null;
       const publisher = bookData.publishers?.map(p => p.name).join(', ') || null;
       const year = bookData.publish_date || null;

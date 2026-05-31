@@ -17,6 +17,7 @@ export default function BookDetail() {
   const [comments, setComments] = useState([])
   const [animatingThumb, setAnimatingThumb] = useState(null)
   const [coverError, setCoverError] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchBook = async () => {
     try {
@@ -73,6 +74,19 @@ export default function BookDetail() {
     }
   }
 
+  const handleDelete = async () => {
+    if (!window.confirm(`Remove "${book.title}" from the library? This cannot be undone.`)) return
+    try {
+      setDeleting(true)
+      const res = await fetch(`/api/books/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete')
+      navigate('/library')
+    } catch (err) {
+      setDeleting(false)
+      alert('Could not remove the book. Please try again.')
+    }
+  }
+
   const handleSubmitComment = async (e) => {
     e.preventDefault()
     if (!selectedThumb && !comment.trim()) {
@@ -108,14 +122,23 @@ export default function BookDetail() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
-      {/* Back button */}
-      <button
-        onClick={() => navigate('/library')}
-        className="flex items-center gap-2 text-purple-600 font-bold hover:text-purple-800 transition-colors mb-6 group"
-      >
-        <span className="group-hover:-translate-x-1 transition-transform">←</span>
-        Back to Library
-      </button>
+      {/* Back button + delete */}
+      <div className="flex items-center justify-between mb-6">
+        <button
+          onClick={() => navigate('/library')}
+          className="flex items-center gap-2 text-purple-600 font-bold hover:text-purple-800 transition-colors group"
+        >
+          <span className="group-hover:-translate-x-1 transition-transform">←</span>
+          Back to Library
+        </button>
+        <button
+          onClick={handleDelete}
+          disabled={deleting}
+          className="flex items-center gap-1.5 text-red-400 hover:text-red-600 font-bold text-sm transition-colors disabled:opacity-50"
+        >
+          🗑️ {deleting ? 'Removing...' : 'Remove from library'}
+        </button>
+      </div>
 
       <div className="bg-white rounded-3xl shadow-xl overflow-hidden border-4 border-purple-200">
         <div className="bg-gradient-to-r from-purple-400 via-pink-400 to-orange-400 h-3" />
@@ -130,6 +153,7 @@ export default function BookDetail() {
                     src={book.cover_url}
                     alt={`Cover of ${book.title}`}
                     className="w-full aspect-[2/3] object-cover"
+                    onLoad={(e) => { if (e.currentTarget.naturalWidth <= 1) setCoverError(true) }}
                     onError={() => setCoverError(true)}
                   />
                 ) : (

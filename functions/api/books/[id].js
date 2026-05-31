@@ -1,6 +1,6 @@
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -41,6 +41,28 @@ export async function onRequest(context) {
       `).bind(id).all();
 
       return new Response(JSON.stringify({ ...book, comments }), {
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: err.message }), {
+        status: 500,
+        headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
+  if (request.method === 'DELETE') {
+    try {
+      const id = params.id;
+      const book = await env.DB.prepare('SELECT id FROM books WHERE id = ?').bind(id).first();
+      if (!book) {
+        return new Response(JSON.stringify({ error: 'Book not found' }), {
+          status: 404,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+      }
+      await env.DB.prepare('DELETE FROM books WHERE id = ?').bind(id).run();
+      return new Response(JSON.stringify({ success: true }), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     } catch (err) {
