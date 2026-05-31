@@ -4,4 +4,4 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "bellsmedleybookclub"
-database_id = "REPLACE_WITH_ACTUAL_ID"
+database_id = "cc3a701a-8816-4f57-942c-350b0c790f39"
