@@ -59,17 +59,49 @@ body {
   box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
 }
 
-/* html5-qrcode overrides */
+/* html5-qrcode overrides — suppress all default UI, fill container */
 #qr-reader {
   border: none !important;
+  padding: 0 !important;
   width: 100% !important;
+  height: 100% !important;
 }
-
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover !important;
+  border-radius: 0 !important;
+}
+/* Hide the library's own dashboard UI (select camera, stop button, etc.) */
+#qr-reader__dashboard,
+#qr-reader__header_message,
+#qr-reader__status_span,
+#qr-reader__filescan_input,
+#qr-reader__camera_permission_button {
+  display: none !important;
+}
 #qr-reader__scan_region {
-  border-radius: 12px;
-  overflow: hidden;
+  padding: 0 !important;
+  height: 100% !important;
+}
+#qr-reader__scan_region img {
+  display: none !important;
 }
 
-#qr-reader__dashboard_section_swaplink {
-  color: #8b5cf6 !important;
+/* Scan line animation */
+@keyframes scan-line {
+  0%   { top: 8%; opacity: 1; }
+  48%  { opacity: 1; }
+  50%  { top: 82%; opacity: 1; }
+  98%  { opacity: 1; }
+  100% { top: 8%; opacity: 1; }
+}
+.animate-scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: rgba(250, 204, 21, 0.9);
+  box-shadow: 0 0 8px 2px rgba(250, 204, 21, 0.6);
+  animation: scan-line 2s ease-in-out infinite;
 }
