@@ -99,6 +99,13 @@ export default function AddBook() {
     }
   }, [])
 
+  // Build high-res Google Books cover from volume ID
+  const gbCoverUrl = (volumeId) =>
+    `https://books.google.com/books/publisher/content/images/frontcover/${volumeId}?fife=w600-h900&source=gbs_api`
+
+  const olCoverUrl = (isbn) =>
+    `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`
+
   // Lookup via Google Books first, fall back to Open Library (mirrors backend)
   const lookupIsbn = async (isbnOverride) => {
     const cleanIsbn = (isbnOverride ?? isbn).replace(/[^0-9X]/gi, '')
@@ -112,14 +119,22 @@ export default function AddBook() {
     try {
       const gbRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}&maxResults=1`)
       const gbData = await gbRes.json()
-      const gbItem = gbData.items?.[0]?.volumeInfo
+      const gbVolume = gbData.items?.[0]
+      const gbItem = gbVolume?.volumeInfo
       if (gbItem) {
         let title = gbItem.title || 'Unknown Title'
-        if (gbItem.subtitle) title = `${title}: ${gbItem.subtitle}`
-        const rawCover = gbItem.imageLinks?.large || gbItem.imageLinks?.medium || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null
-        const cover_url = rawCover
-          ? rawCover.replace(/^http:/, 'https:').replace('&edge=curl', '').replace('zoom=1', 'zoom=0')
-          : null
+        if (gbItem.subtitle && !title.toLowerCase().includes(gbItem.subtitle.toLowerCase())) {
+          title = `${title}: ${gbItem.subtitle}`
+        }
+        // Use high-res cover via volumeId, fall back to thumbnail
+        let cover_url = gbVolume.id ? gbCoverUrl(gbVolume.id) : null
+        if (!cover_url) {
+          const raw = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
+            || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null
+          cover_url = raw
+            ? raw.replace(/^http:/, 'https:').replace('&edge=curl', '').replace('zoom=1', 'zoom=0')
+            : olCoverUrl(cleanIsbn)
+        }
         setPreview({
           isbn: cleanIsbn,
           title,
@@ -143,7 +158,7 @@ export default function AddBook() {
           isbn: cleanIsbn,
           title: bookData.title || 'Unknown Title',
           author: bookData.authors?.map(a => a.name).join(', ') || null,
-          cover_url: bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || null,
+          cover_url: bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || olCoverUrl(cleanIsbn),
           publisher: bookData.publishers?.map(p => p.name).join(', ') || null,
           year: bookData.publish_date || null,
         })
