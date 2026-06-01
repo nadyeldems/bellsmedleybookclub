@@ -43,15 +43,13 @@ async function fetchBookMetadata(isbn, apiKey) {
         title = `${title}: ${gbItem.subtitle}`;
       }
 
-      // Cover: prefer the volumeId-based public URL, fall back to thumb URL
-      let cover_url = null;
-      if (gbVolume.id) {
-        cover_url = gbCoverFromId(gbVolume.id);
-      } else {
-        const thumb = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
-          || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
-        if (thumb) cover_url = gbCoverFromThumb(thumb);
-      }
+      // Only use GB cover when imageLinks are confirmed — the content endpoint
+      // returns an "image not available" placeholder (not a 404) when no cover
+      // exists, which can't be reliably detected client-side.
+      const rawThumb = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
+        || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
+      let cover_url = rawThumb ? gbCoverFromThumb(rawThumb)
+        : (gbVolume.id && gbItem.imageLinks ? gbCoverFromId(gbVolume.id) : null);
 
       result = {
         title,

@@ -136,13 +136,17 @@ export async function onRequest(context) {
           publisher = gbItem.publisher || null;
           year = gbItem.publishedDate || null;
 
-          if (gbVolume.id) {
+          // Only use GB cover URL when imageLinks are confirmed — the content
+          // endpoint returns an "image not available" placeholder (not a 404)
+          // when there's no cover, which we can't easily detect client-side.
+          const rawThumb = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
+            || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
+          if (rawThumb) {
+            cover_url = gbCoverFromThumb(rawThumb);
+          } else if (gbVolume.id && gbItem.imageLinks) {
             cover_url = gbCoverFromId(gbVolume.id);
-          } else {
-            const raw = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
-              || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
-            cover_url = raw ? gbCoverFromThumb(raw) : null;
           }
+          // No imageLinks → leave cover_url null, OL will fill it below
 
           foundBook = true;
         }
