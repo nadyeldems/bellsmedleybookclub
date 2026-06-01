@@ -99,11 +99,14 @@ export default function AddBook() {
     }
   }, [])
 
-  // Build high-res Google Books cover from volume ID
-  const gbCoverUrl = (volumeId) =>
-    `https://books.google.com/books/publisher/content/images/frontcover/${volumeId}?fife=w600-h900&source=gbs_api`
-
-  const olCoverUrl = (isbn) =>
+  // Correct public Google Books cover URL (books/content endpoint)
+  const gbCoverFromId = (volumeId) =>
+    `https://books.google.com/books/content?id=${volumeId}&printsec=frontcover&img=1&zoom=0&source=gbs_api`
+  const gbCoverFromThumb = (thumb) =>
+    thumb.replace(/^http:/, 'https:').replace('&edge=curl', '').replace(/zoom=\d/, 'zoom=0')
+  const olCoverById = (id) =>
+    `https://covers.openlibrary.org/b/id/${id}-L.jpg`
+  const olCoverByIsbn = (isbn) =>
     `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`
 
   // Lookup via Google Books first, fall back to Open Library (mirrors backend)
@@ -115,60 +118,81 @@ export default function AddBook() {
     setPreview(null)
     setAddError(null)
 
-    // Try Google Books
+    let prev = {}
+
+    // 1. Google Books
     try {
       const gbRes = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}&maxResults=1`)
       const gbData = await gbRes.json()
       const gbVolume = gbData.items?.[0]
       const gbItem = gbVolume?.volumeInfo
-      if (gbItem) {
-        let title = gbItem.title || 'Unknown Title'
-        if (gbItem.subtitle && !title.toLowerCase().includes(gbItem.subtitle.toLowerCase())) {
+      if (gbItem && !gbData.error) {
+        let title = gbItem.title || null
+        if (gbItem.subtitle && !title?.toLowerCase().includes(gbItem.subtitle.toLowerCase())) {
           title = `${title}: ${gbItem.subtitle}`
         }
-        // Use high-res cover via volumeId, fall back to thumbnail
-        let cover_url = gbVolume.id ? gbCoverUrl(gbVolume.id) : null
+        let cover_url = gbVolume.id ? gbCoverFromId(gbVolume.id) : null
         if (!cover_url) {
           const raw = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
             || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null
-          cover_url = raw
-            ? raw.replace(/^http:/, 'https:').replace('&edge=curl', '').replace('zoom=1', 'zoom=0')
-            : olCoverUrl(cleanIsbn)
+          if (raw) cover_url = gbCoverFromThumb(raw)
         }
-        setPreview({
+        prev = {
           isbn: cleanIsbn,
           title,
           author: gbItem.authors?.join(', ') || null,
           cover_url,
           publisher: gbItem.publisher || null,
           year: gbItem.publishedDate || null,
-        })
-        setLookupState('done')
-        return
+        }
       }
     } catch {}
 
-    // Fall back to Open Library
+    // 2. Open Library Search (better covers + fills gaps from GB)
     try {
-      const olRes = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`)
-      const olData = await olRes.json()
-      const bookData = olData[`ISBN:${cleanIsbn}`]
-      if (bookData) {
-        setPreview({
-          isbn: cleanIsbn,
-          title: bookData.title || 'Unknown Title',
-          author: bookData.authors?.map(a => a.name).join(', ') || null,
-          cover_url: bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || olCoverUrl(cleanIsbn),
-          publisher: bookData.publishers?.map(p => p.name).join(', ') || null,
-          year: bookData.publish_date || null,
-        })
-        setLookupState('done')
-        return
+      const olSRes = await fetch(`https://openlibrary.org/search.json?isbn=${cleanIsbn}&fields=title,subtitle,author_name,cover_i,publisher,first_publish_year&limit=1`)
+      const olS = await olSRes.json()
+      const doc = olS.docs?.[0]
+      if (doc) {
+        let olTitle = doc.title || null
+        if (doc.subtitle && !olTitle?.toLowerCase().includes(doc.subtitle.toLowerCase())) olTitle = `${olTitle}: ${doc.subtitle}`
+        if (!prev.title && olTitle) prev.title = olTitle
+        if (!prev.author) prev.author = doc.author_name?.join(', ') || null
+        if (!prev.publisher) prev.publisher = Array.isArray(doc.publisher) ? doc.publisher[0] : doc.publisher || null
+        if (!prev.year && doc.first_publish_year) prev.year = String(doc.first_publish_year)
+        if (!prev.cover_url && doc.cover_i) prev.cover_url = olCoverById(doc.cover_i)
+        prev.isbn = prev.isbn || cleanIsbn
       }
     } catch {}
 
-    setLookupError("No book found with that ISBN — try adding it manually using the ✏️ tab.")
-    setLookupState('error')
+    // 3. Open Library Data API
+    if (!prev.title) {
+      try {
+        const olRes = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`)
+        const olData = await olRes.json()
+        const bookData = olData[`ISBN:${cleanIsbn}`]
+        if (bookData) {
+          prev = {
+            isbn: cleanIsbn,
+            title: bookData.title || null,
+            author: bookData.authors?.map(a => a.name).join(', ') || null,
+            cover_url: bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || olCoverByIsbn(cleanIsbn),
+            publisher: bookData.publishers?.map(p => p.name).join(', ') || null,
+            year: bookData.publish_date || null,
+          }
+        }
+      } catch {}
+    }
+
+    if (!prev.cover_url && prev.title) prev.cover_url = olCoverByIsbn(cleanIsbn)
+
+    if (prev.title) {
+      setPreview(prev)
+      setLookupState('done')
+    } else {
+      setLookupError("No book found with that ISBN — try adding it manually using the ✏️ tab.")
+      setLookupState('error')
+    }
   }
 
   const resetPreview = () => {

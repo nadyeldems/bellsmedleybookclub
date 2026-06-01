@@ -98,96 +98,107 @@ export async function onRequest(context) {
       }
 
       // ── Helpers ────────────────────────────────────────────────────────────
+      const apiKey = env.GOOGLE_BOOKS_API_KEY || null;
 
-      // Build the best available Google Books cover URL from a volumeId.
-      // Using the publisher/content endpoint with a fife size param gives
-      // much higher resolution than the default thumbnail.
-      function gbCoverUrl(volumeId) {
-        return `https://books.google.com/books/publisher/content/images/frontcover/${volumeId}?fife=w600-h900&source=gbs_api`;
+      function gbCoverFromId(volumeId) {
+        return `https://books.google.com/books/content?id=${volumeId}&printsec=frontcover&img=1&zoom=0&source=gbs_api`;
       }
-
-      // Open Library covers endpoint — returns a real image or a 1×1 gif.
-      // We store the URL and let the frontend's onLoad/naturalWidth check
-      // filter out the blank placeholder.
-      function olCoverUrl(isbn) {
+      function gbCoverFromThumb(thumb) {
+        return thumb.replace(/^http:/, 'https:').replace('&edge=curl', '').replace(/zoom=\d/, 'zoom=0');
+      }
+      function olCoverById(id) {
+        return `https://covers.openlibrary.org/b/id/${id}-L.jpg`;
+      }
+      function olCoverByIsbn(isbn) {
         return `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
       }
 
-      // ── Try Google Books first (best for children's books) ─────────────────
+      // ── 1. Google Books ─────────────────────────────────────────────────
       let title, author, cover_url, description, publisher, year;
       let foundBook = false;
 
       try {
-        const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}&maxResults=1`;
-        const gbRes = await fetch(gbUrl);
+        const keyParam = apiKey ? `&key=${apiKey}` : '';
+        const gbRes = await fetch(
+          `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}&maxResults=1${keyParam}`
+        );
         const gbData = await gbRes.json();
         const gbVolume = gbData.items?.[0];
         const gbItem = gbVolume?.volumeInfo;
 
-        if (gbItem) {
-          // Build full title: prefer "Series: Subtitle" form when both present
+        if (gbItem && !gbData.error) {
           title = gbItem.title || null;
-          if (gbItem.subtitle) {
-            // Only append subtitle if it's not already part of the title
-            if (!title?.toLowerCase().includes(gbItem.subtitle.toLowerCase())) {
-              title = `${title}: ${gbItem.subtitle}`;
-            }
+          if (gbItem.subtitle && !title?.toLowerCase().includes(gbItem.subtitle.toLowerCase())) {
+            title = `${title}: ${gbItem.subtitle}`;
           }
-
           author = gbItem.authors?.join(', ') || null;
           description = gbItem.description || null;
           publisher = gbItem.publisher || null;
           year = gbItem.publishedDate || null;
 
-          // Cover: prefer the high-res publisher endpoint using volumeId,
-          // fall back to thumbnail URL with edge/zoom fixes
           if (gbVolume.id) {
-            cover_url = gbCoverUrl(gbVolume.id);
+            cover_url = gbCoverFromId(gbVolume.id);
           } else {
-            const rawCover = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
+            const raw = gbItem.imageLinks?.large || gbItem.imageLinks?.medium
               || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
-            cover_url = rawCover
-              ? rawCover.replace(/^http:/, 'https:').replace('&edge=curl', '').replace('zoom=1', 'zoom=0')
-              : null;
-          }
-
-          // If Google Books has no cover at all, try Open Library covers directly
-          if (!cover_url) {
-            cover_url = olCoverUrl(cleanIsbn);
+            cover_url = raw ? gbCoverFromThumb(raw) : null;
           }
 
           foundBook = true;
         }
-      } catch (_) {
-        // Google Books failed, will try Open Library data API
-      }
+      } catch (_) {}
 
-      // ── Fall back to Open Library data API ─────────────────────────────────
+      // ── 2. Open Library Search API (better cover IDs + richer metadata) ──
+      try {
+        const olSearchRes = await fetch(
+          `https://openlibrary.org/search.json?isbn=${cleanIsbn}&fields=title,subtitle,author_name,cover_i,publisher,first_publish_year&limit=1`
+        );
+        const olSearch = await olSearchRes.json();
+        const doc = olSearch.docs?.[0];
+
+        if (doc) {
+          let olTitle = doc.title || null;
+          if (doc.subtitle && !olTitle?.toLowerCase().includes(doc.subtitle.toLowerCase())) {
+            olTitle = `${olTitle}: ${doc.subtitle}`;
+          }
+          if (!title && olTitle) { title = olTitle; foundBook = true; }
+          if (!author) author = doc.author_name?.join(', ') || null;
+          if (!publisher) publisher = Array.isArray(doc.publisher) ? doc.publisher[0] : doc.publisher || null;
+          if (!year && doc.first_publish_year) year = String(doc.first_publish_year);
+          // OL cover by ID is often higher quality than GB thumbnail
+          if (!cover_url && doc.cover_i) cover_url = olCoverById(doc.cover_i);
+          if (doc.cover_i && cover_url && !cover_url.includes('covers.openlibrary.org')) {
+            // Prefer OL cover ID over GB URL when available — generally sharper
+            // (comment out this line to always prefer GB)
+            // cover_url = olCoverById(doc.cover_i);
+          }
+        }
+      } catch (_) {}
+
+      // ── 3. Open Library Data API fallback ─────────────────────────────────
       if (!foundBook) {
         try {
-          const olUrl = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`;
-          const olRes = await fetch(olUrl);
+          const olRes = await fetch(
+            `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`
+          );
           const olData = await olRes.json();
           const bookData = olData[`ISBN:${cleanIsbn}`];
-
           if (bookData) {
-            title = bookData.title || null;
-            author = bookData.authors?.map(a => a.name).join(', ') || null;
-            // Prefer OL cover data, but also try the direct cover endpoint
-            cover_url = bookData.cover?.large || bookData.cover?.medium
-              || bookData.cover?.small || olCoverUrl(cleanIsbn);
-            description = bookData.excerpts?.[0]?.text || bookData.notes || null;
-            publisher = bookData.publishers?.map(p => p.name).join(', ') || null;
-            year = bookData.publish_date || null;
+            title = title || bookData.title || null;
+            author = author || bookData.authors?.map(a => a.name).join(', ') || null;
+            cover_url = cover_url || bookData.cover?.large || bookData.cover?.medium
+              || bookData.cover?.small || null;
+            description = description || bookData.excerpts?.[0]?.text || bookData.notes || null;
+            publisher = publisher || bookData.publishers?.map(p => p.name).join(', ') || null;
+            year = year || bookData.publish_date || null;
             foundBook = true;
           }
         } catch (_) {}
       }
 
-      // ── Last resort: Open Library covers-only (no metadata) ────────────────
-      // Sometimes OL has a cover scan for an ISBN even with no data entry.
-      // We can't verify without a HEAD request so we just store the URL and let
-      // the frontend's blank-image detection handle it if it 404s.
+      // ── Last resort OL cover by ISBN ───────────────────────────────────────
+      if (foundBook && !cover_url) cover_url = olCoverByIsbn(cleanIsbn);
+
       if (!foundBook) {
         return new Response(JSON.stringify({ error: 'Book not found. Please check the ISBN and try again.' }), {
           status: 404,
