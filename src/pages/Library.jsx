@@ -8,6 +8,10 @@ export default function Library() {
   const [error, setError] = useState(null)
   const [search, setSearch] = useState('')
 
+  // Bulk refresh state
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshProgress, setRefreshProgress] = useState(null) // { done, total, skipped }
+
   const fetchBooks = async () => {
     try {
       setLoading(true)
@@ -26,6 +30,32 @@ export default function Library() {
   useEffect(() => {
     fetchBooks()
   }, [])
+
+  const handleRefreshAll = async () => {
+    const eligible = books.filter(b => b.isbn)
+    if (!eligible.length) return
+    setRefreshing(true)
+    setRefreshProgress({ done: 0, total: eligible.length, skipped: 0 })
+    let skipped = 0
+    for (let i = 0; i < eligible.length; i++) {
+      const book = eligible[i]
+      try {
+        const res = await fetch(`/api/books/${book.id}`, { method: 'PATCH' })
+        if (res.ok) {
+          const updated = await res.json()
+          setBooks(prev => prev.map(b => b.id === updated.id ? { ...b, ...updated } : b))
+        } else {
+          skipped++
+        }
+      } catch {
+        skipped++
+      }
+      setRefreshProgress({ done: i + 1, total: eligible.length, skipped })
+      // Small delay between requests to avoid rate-limiting
+      if (i < eligible.length - 1) await new Promise(r => setTimeout(r, 300))
+    }
+    setRefreshing(false)
+  }
 
   const filtered = books.filter((b) => {
     const q = search.toLowerCase()
@@ -49,6 +79,24 @@ export default function Library() {
         <p className="text-white/80 font-semibold mt-1">
           {books.length} book{books.length !== 1 ? 's' : ''} in the club
         </p>
+        {books.some(b => b.isbn) && (
+          <button
+            onClick={handleRefreshAll}
+            disabled={refreshing || loading}
+            className="mt-3 bg-white/20 hover:bg-white/30 text-white font-bold px-5 py-2 rounded-full text-sm transition-all duration-200 disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ fontFamily: '"Fredoka One", cursive' }}
+          >
+            {refreshing
+              ? `🔄 Refreshing… ${refreshProgress?.done}/${refreshProgress?.total}`
+              : '🔄 Refresh All Covers & Titles'}
+          </button>
+        )}
+        {!refreshing && refreshProgress && (
+          <p className="text-white/80 text-sm font-semibold mt-1">
+            ✅ Done! {refreshProgress.total - refreshProgress.skipped} updated
+            {refreshProgress.skipped > 0 ? `, ${refreshProgress.skipped} skipped` : ''}
+          </p>
+        )}
       </div>
 
       {/* Search bar */}

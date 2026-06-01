@@ -29,6 +29,8 @@ export default function BookDetail() {
   const [error, setError] = useState(null)
   const [coverError, setCoverError] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshMsg, setRefreshMsg] = useState(null)
 
   // Ratings state
   const [thumbsUp, setThumbsUp] = useState(0)
@@ -176,6 +178,24 @@ export default function BookDetail() {
     }
   }
 
+  const handleRefresh = async () => {
+    setRefreshing(true)
+    setRefreshMsg(null)
+    try {
+      const res = await fetch(`/api/books/${id}`, { method: 'PATCH' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Refresh failed')
+      setBook(prev => ({ ...prev, ...data }))
+      setCoverError(false)
+      setRefreshMsg('✅ Metadata updated!')
+    } catch (err) {
+      setRefreshMsg(`😬 ${err.message}`)
+    } finally {
+      setRefreshing(false)
+      setTimeout(() => setRefreshMsg(null), 4000)
+    }
+  }
+
   const handleDelete = async () => {
     if (!window.confirm(`Remove "${book.title}" from the library? This cannot be undone.`)) return
     setDeleting(true)
@@ -214,16 +234,28 @@ export default function BookDetail() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       {/* Top bar */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="relative flex items-center justify-between mb-6">
         <button onClick={() => navigate('/library')}
           className="flex items-center gap-2 text-purple-600 font-bold hover:text-purple-800 transition-colors group">
           <span className="group-hover:-translate-x-1 transition-transform">←</span>
           Back to Library
         </button>
-        <button onClick={handleDelete} disabled={deleting}
-          className="flex items-center gap-1.5 text-red-400 hover:text-red-600 font-bold text-sm transition-colors disabled:opacity-50">
-          🗑️ {deleting ? 'Removing...' : 'Remove from library'}
-        </button>
+        <div className="flex items-center gap-3">
+          {book?.isbn && (
+            <button onClick={handleRefresh} disabled={refreshing || deleting}
+              className="flex items-center gap-1.5 text-blue-400 hover:text-blue-600 font-bold text-sm transition-colors disabled:opacity-50"
+              title="Re-fetch title, cover and metadata from the internet">
+              {refreshing ? '⏳ Refreshing...' : '🔄 Refresh'}
+            </button>
+          )}
+          <button onClick={handleDelete} disabled={deleting || refreshing}
+            className="flex items-center gap-1.5 text-red-400 hover:text-red-600 font-bold text-sm transition-colors disabled:opacity-50">
+            🗑️ {deleting ? 'Removing...' : 'Remove from library'}
+          </button>
+        </div>
+        {refreshMsg && (
+          <span className="text-xs font-bold text-gray-500 absolute top-16 right-4">{refreshMsg}</span>
+        )}
       </div>
 
       <div className="bg-white rounded-3xl shadow-xl overflow-hidden border-4 border-purple-200">
