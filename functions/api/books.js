@@ -69,25 +69,59 @@ export async function onRequest(context) {
         });
       }
 
-      // Fetch from Open Library
-      const olUrl = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`;
-      const olRes = await fetch(olUrl);
-      const olData = await olRes.json();
-      const bookData = olData[`ISBN:${cleanIsbn}`];
+      // Try Google Books first (better coverage for children's books)
+      let title, author, cover_url, description, publisher, year;
+      let foundBook = false;
 
-      if (!bookData) {
-        return new Response(JSON.stringify({ error: 'Book not found in Open Library' }), {
+      try {
+        const gbUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${cleanIsbn}&maxResults=1`;
+        const gbRes = await fetch(gbUrl);
+        const gbData = await gbRes.json();
+        const gbItem = gbData.items?.[0]?.volumeInfo;
+
+        if (gbItem) {
+          title = gbItem.title || null;
+          // Combine title + subtitle if present
+          if (gbItem.subtitle) title = `${title}: ${gbItem.subtitle}`;
+          author = gbItem.authors?.join(', ') || null;
+          // Upgrade to HTTPS and get best quality cover
+          const rawCover = gbItem.imageLinks?.large || gbItem.imageLinks?.medium || gbItem.imageLinks?.thumbnail || gbItem.imageLinks?.smallThumbnail || null;
+          cover_url = rawCover ? rawCover.replace(/^http:/, 'https:').replace('&edge=curl', '').replace('zoom=1', 'zoom=0') : null;
+          description = gbItem.description || null;
+          publisher = gbItem.publisher || null;
+          year = gbItem.publishedDate || null;
+          foundBook = true;
+        }
+      } catch (_) {
+        // Google Books failed, will try Open Library
+      }
+
+      // Fall back to Open Library if Google Books didn't find it
+      if (!foundBook) {
+        const olUrl = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&jscmd=data&format=json`;
+        const olRes = await fetch(olUrl);
+        const olData = await olRes.json();
+        const bookData = olData[`ISBN:${cleanIsbn}`];
+
+        if (bookData) {
+          title = bookData.title || null;
+          author = bookData.authors?.map(a => a.name).join(', ') || null;
+          cover_url = bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || null;
+          description = bookData.excerpts?.[0]?.text || bookData.notes || null;
+          publisher = bookData.publishers?.map(p => p.name).join(', ') || null;
+          year = bookData.publish_date || null;
+          foundBook = true;
+        }
+      }
+
+      if (!foundBook) {
+        return new Response(JSON.stringify({ error: 'Book not found. Please check the ISBN and try again.' }), {
           status: 404,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         });
       }
 
-      const title = bookData.title || 'Unknown Title';
-      const author = bookData.authors?.map(a => a.name).join(', ') || null;
-      const cover_url = bookData.cover?.large || bookData.cover?.medium || bookData.cover?.small || null;
-      const description = bookData.excerpts?.[0]?.text || bookData.notes || null;
-      const publisher = bookData.publishers?.map(p => p.name).join(', ') || null;
-      const year = bookData.publish_date || null;
+      title = title || 'Unknown Title';
 
       const result = await env.DB.prepare(`
         INSERT INTO books (isbn, title, author, cover_url, description, publisher, year)
