@@ -46,6 +46,7 @@ export default function BookDetail() {
   const [pendingStar, setPendingStar] = useState(0)
   const [submittingStar, setSubmittingStar] = useState(false)
   const [starSubmitted, setStarSubmitted] = useState(false)
+  const [starError, setStarError] = useState(null)
 
   // Read log state
   const [reads, setReads] = useState([])
@@ -80,8 +81,8 @@ export default function BookDetail() {
   // ── Star rating ──────────────────────────────────────────────────────────
   const handleStarSubmit = async (stars) => {
     if (!stars || submittingStar || starSubmitted) return
-    setPendingStar(stars)
     setSubmittingStar(true)
+    setStarError(null)
     try {
       const res = await fetch(`/api/books/${id}/ratings`, {
         method: 'POST',
@@ -89,12 +90,12 @@ export default function BookDetail() {
         body: JSON.stringify({ stars }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
+      if (!res.ok) throw new Error(data.error || 'Failed to save rating')
       setAvgStars(data.avg_stars)
       setStarCount(data.star_count)
       setStarSubmitted(true)
-    } catch {
-      setPendingStar(0)
+    } catch (err) {
+      setStarError(err.message)
     } finally {
       setSubmittingStar(false)
     }
@@ -310,7 +311,7 @@ export default function BookDetail() {
                 <div className="flex items-center gap-4">
                   <StarPicker
                     value={pendingStar}
-                    onChange={setPendingStar}
+                    onChange={(v) => { setPendingStar(v); setStarError(null) }}
                     size="xl"
                   />
                   {pendingStar > 0 && (
@@ -328,6 +329,9 @@ export default function BookDetail() {
                   <p className="text-gray-500 text-sm font-semibold">
                     {['', '😬 Not great...', '😐 It was okay', '🙂 Pretty good!', '😄 Really good!', '🤩 Amazing!!'][pendingStar]}
                   </p>
+                )}
+                {starError && (
+                  <p className="text-red-500 font-bold text-sm">😬 {starError}</p>
                 )}
               </div>
             )}
