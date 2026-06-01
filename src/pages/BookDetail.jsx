@@ -1,7 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import StarPicker from '../components/StarPicker'
 import StarRating from '../components/StarRating'
+
+function compressImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      const MAX_W = 400
+      const scale = Math.min(1, MAX_W / img.width)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.82))
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read image')) }
+    img.src = url
+  })
+}
 
 // Format a datetime string for display
 function fmtDate(str) {
@@ -18,6 +37,36 @@ function nowLocal() {
   const d = new Date()
   d.setSeconds(0, 0)
   return d.toISOString().slice(0, 16)
+}
+
+// A single cover option thumbnail — hides itself if the image fails or is a 1×1 blank
+function CoverOption({ url, label, saving, current, onSelect }) {
+  const [hidden, setHidden] = useState(false)
+  if (hidden) return null
+  return (
+    <button
+      onClick={onSelect}
+      disabled={saving || current}
+      title={label}
+      className={`relative rounded-lg overflow-hidden border-2 transition-all duration-150 flex-shrink-0
+        ${current ? 'border-purple-500 ring-2 ring-purple-400' : 'border-gray-200 hover:border-purple-400'}
+        disabled:cursor-not-allowed`}
+      style={{ width: 56, height: 84 }}
+    >
+      <img
+        src={url}
+        alt={label}
+        className="w-full h-full object-cover"
+        onLoad={(e) => { if (e.currentTarget.naturalWidth <= 1) setHidden(true) }}
+        onError={() => setHidden(true)}
+      />
+      {current && (
+        <div className="absolute inset-0 bg-purple-500/20 flex items-center justify-center">
+          <span className="text-white text-lg drop-shadow">✓</span>
+        </div>
+      )}
+    </button>
+  )
 }
 
 export default function BookDetail() {
@@ -49,6 +98,13 @@ export default function BookDetail() {
   const [submittingStar, setSubmittingStar] = useState(false)
   const [starSubmitted, setStarSubmitted] = useState(false)
   const [starError, setStarError] = useState(null)
+
+  // Cover picker state
+  const [showCoverPicker, setShowCoverPicker] = useState(false)
+  const [coverOptions, setCoverOptions] = useState([])
+  const [coversLoading, setCoversLoading] = useState(false)
+  const [savingCover, setSavingCover] = useState(false)
+  const coverUploadRef = useRef(null)
 
   // Read log state
   const [reads, setReads] = useState([])
@@ -178,6 +234,52 @@ export default function BookDetail() {
     }
   }
 
+  const openCoverPicker = async () => {
+    setShowCoverPicker(true)
+    setCoversLoading(true)
+    setCoverOptions([])
+    try {
+      const res = await fetch(`/api/books/${id}/covers`)
+      const data = await res.json()
+      setCoverOptions(data.covers || [])
+    } catch {
+      setCoverOptions([])
+    } finally {
+      setCoversLoading(false)
+    }
+  }
+
+  const saveCover = async (url) => {
+    setSavingCover(true)
+    try {
+      const res = await fetch(`/api/books/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cover_url: url }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setBook(prev => ({ ...prev, cover_url: url }))
+      setCoverError(false)
+      setShowCoverPicker(false)
+    } catch (err) {
+      alert('Could not save cover: ' + err.message)
+    } finally {
+      setSavingCover(false)
+    }
+  }
+
+  const handleCoverUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    try {
+      const compressed = await compressImage(file)
+      await saveCover(compressed)
+    } catch (err) {
+      alert('Could not read image: ' + err.message)
+    }
+  }
+
   const handleRefresh = async () => {
     setRefreshing(true)
     setRefreshMsg(null)
@@ -264,19 +366,86 @@ export default function BookDetail() {
         <div className="p-6 md:p-8">
           {/* Book info */}
           <div className="flex flex-col md:flex-row gap-8">
-            <div className="flex-shrink-0 mx-auto md:mx-0">
-              <div className="w-44 md:w-52 rounded-2xl overflow-hidden shadow-lg border-4 border-white ring-4 ring-purple-200">
-                {book.cover_url && !coverError ? (
-                  <img src={book.cover_url} alt={`Cover of ${book.title}`}
-                    className="w-full aspect-[2/3] object-cover"
-                    onLoad={(e) => { if (e.currentTarget.naturalWidth <= 1) setCoverError(true) }}
-                    onError={() => setCoverError(true)} />
-                ) : (
-                  <div className="w-full aspect-[2/3] bg-gradient-to-br from-purple-200 to-pink-200 flex items-center justify-center">
-                    <span className="text-6xl">📖</span>
-                  </div>
-                )}
+            <div className="flex-shrink-0 mx-auto md:mx-0 flex flex-col items-center gap-2">
+              {/* Cover image with change-cover overlay */}
+              <div className="relative group w-44 md:w-52">
+                <div className="rounded-2xl overflow-hidden shadow-lg border-4 border-white ring-4 ring-purple-200">
+                  {book.cover_url && !coverError ? (
+                    <img src={book.cover_url} alt={`Cover of ${book.title}`}
+                      className="w-full aspect-[2/3] object-cover"
+                      onLoad={(e) => { if (e.currentTarget.naturalWidth <= 1) setCoverError(true) }}
+                      onError={() => setCoverError(true)} />
+                  ) : (
+                    <div className="w-full aspect-[2/3] bg-gradient-to-br from-purple-200 to-pink-200 flex items-center justify-center">
+                      <span className="text-6xl">📖</span>
+                    </div>
+                  )}
+                </div>
+                {/* Change cover button */}
+                <button
+                  onClick={showCoverPicker ? () => setShowCoverPicker(false) : openCoverPicker}
+                  className="absolute inset-0 rounded-2xl bg-black/0 group-hover:bg-black/40 transition-all duration-200 flex items-end justify-center pb-3 opacity-0 group-hover:opacity-100"
+                >
+                  <span className="bg-white/90 text-purple-700 font-bold text-xs px-3 py-1.5 rounded-full shadow">
+                    {showCoverPicker ? '✕ Close' : '🖼️ Change cover'}
+                  </span>
+                </button>
               </div>
+              {/* Always-visible change cover link for mobile (no hover) */}
+              <button
+                onClick={showCoverPicker ? () => setShowCoverPicker(false) : openCoverPicker}
+                className="text-purple-400 hover:text-purple-600 text-xs font-bold transition-colors md:hidden"
+              >
+                {showCoverPicker ? '✕ Close picker' : '🖼️ Change cover'}
+              </button>
+
+              {/* Cover picker panel */}
+              {showCoverPicker && (
+                <div className="w-full md:w-64 bg-white border-2 border-purple-200 rounded-2xl p-3 shadow-lg">
+                  <p className="text-purple-700 font-bold text-sm mb-2" style={{ fontFamily: '"Fredoka One", cursive' }}>
+                    Pick a cover
+                  </p>
+
+                  {coversLoading && (
+                    <div className="flex items-center gap-2 py-3">
+                      <div className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                      <span className="text-gray-500 text-xs font-semibold">Finding covers…</span>
+                    </div>
+                  )}
+
+                  {!coversLoading && (
+                    <div className="flex flex-wrap gap-2">
+                      {coverOptions.map((opt, i) => (
+                        <CoverOption
+                          key={i}
+                          url={opt.url}
+                          label={opt.source}
+                          saving={savingCover}
+                          current={book.cover_url === opt.url}
+                          onSelect={() => saveCover(opt.url)}
+                        />
+                      ))}
+                      {coverOptions.length === 0 && !coversLoading && (
+                        <p className="text-gray-400 text-xs font-semibold w-full">No covers found online</p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Upload own photo */}
+                  <button
+                    onClick={() => coverUploadRef.current?.click()}
+                    disabled={savingCover}
+                    className="mt-2 w-full flex items-center justify-center gap-2 bg-purple-50 hover:bg-purple-100 border-2 border-dashed border-purple-300 rounded-xl py-2 text-purple-600 font-bold text-xs transition-colors disabled:opacity-50"
+                  >
+                    📸 Upload your own photo
+                  </button>
+                  <input ref={coverUploadRef} type="file" accept="image/*" className="hidden" onChange={handleCoverUpload} />
+
+                  {savingCover && (
+                    <p className="text-purple-500 text-xs font-bold mt-2 text-center">Saving…</p>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex-1">

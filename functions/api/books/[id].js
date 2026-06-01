@@ -181,10 +181,29 @@ export async function onRequest(context) {
     }
   }
 
-  // ── PATCH: refresh metadata from APIs ──────────────────────────────────────
+  // ── PATCH: cover-only update OR full metadata refresh ─────────────────────
   if (request.method === 'PATCH') {
     try {
       const id = params.id;
+
+      // If body contains cover_url, just update that field
+      let body = {};
+      try { body = await request.json(); } catch (_) {}
+      if ('cover_url' in body) {
+        const existing = await env.DB.prepare('SELECT id FROM books WHERE id = ?').bind(id).first();
+        if (!existing) {
+          return new Response(JSON.stringify({ error: 'Book not found' }), {
+            status: 404, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+          });
+        }
+        const updated = await env.DB.prepare(
+          'UPDATE books SET cover_url = ? WHERE id = ? RETURNING *'
+        ).bind(body.cover_url || null, id).first();
+        return new Response(JSON.stringify(updated), {
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+      }
+
       const book = await env.DB.prepare('SELECT id, isbn FROM books WHERE id = ?').bind(id).first();
       if (!book) {
         return new Response(JSON.stringify({ error: 'Book not found' }), {
