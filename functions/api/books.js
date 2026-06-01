@@ -49,10 +49,38 @@ export async function onRequest(context) {
   if (request.method === 'POST') {
     try {
       const body = await request.json();
-      const { isbn } = body;
+      const { isbn, title: manualTitle, author: manualAuthor, cover_url: manualCoverUrl } = body;
 
+      // ── MANUAL ENTRY (title provided directly) ──
+      if (manualTitle) {
+        const cleanIsbn = isbn ? isbn.replace(/[^0-9X]/gi, '') : null;
+
+        // Check for duplicate ISBN if one was provided
+        if (cleanIsbn) {
+          const existing = await env.DB.prepare('SELECT * FROM books WHERE isbn = ?').bind(cleanIsbn).first();
+          if (existing) {
+            return new Response(JSON.stringify({ error: 'Book already exists', book: existing }), {
+              status: 409,
+              headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+            });
+          }
+        }
+
+        const result = await env.DB.prepare(`
+          INSERT INTO books (isbn, title, author, cover_url)
+          VALUES (?, ?, ?, ?)
+          RETURNING *
+        `).bind(cleanIsbn, manualTitle.trim(), manualAuthor?.trim() || null, manualCoverUrl || null).first();
+
+        return new Response(JSON.stringify(result), {
+          status: 201,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+      }
+
+      // ── ISBN LOOKUP (existing behaviour) ──
       if (!isbn) {
-        return new Response(JSON.stringify({ error: 'ISBN is required' }), {
+        return new Response(JSON.stringify({ error: 'Either a title (manual entry) or an ISBN is required' }), {
           status: 400,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         });
