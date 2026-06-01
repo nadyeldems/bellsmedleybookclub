@@ -84,14 +84,24 @@ export default function BookCard({ book, index = 0 }) {
           <p className="text-gray-500 text-xs font-semibold truncate">{book.author}</p>
         )}
 
-        {/* Ratings badges */}
-        <div className="flex gap-2 mt-auto pt-2">
-          <span className="inline-flex items-center gap-1 bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded-full border border-green-300">
-            👍 {book.thumbs_up ?? 0}
-          </span>
-          <span className="inline-flex items-center gap-1 bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded-full border border-red-300">
-            👎 {book.thumbs_down ?? 0}
-          </span>
+        {/* Ratings */}
+        <div className="flex flex-col gap-1 mt-auto pt-2">
+          {/* Star rating */}
+          {book.avg_stars ? (
+            <div className="flex items-center gap-1">
+              <span className="text-yellow-400 text-sm leading-none">{'★'.repeat(Math.round(book.avg_stars))}{'☆'.repeat(5 - Math.round(book.avg_stars))}</span>
+              <span className="text-gray-500 text-xs font-bold">{book.avg_stars}</span>
+            </div>
+          ) : null}
+          {/* Thumbs badges */}
+          <div className="flex gap-1.5">
+            <span className="inline-flex items-center gap-0.5 bg-green-100 text-green-700 text-xs font-bold px-1.5 py-0.5 rounded-full border border-green-300">
+              👍 {book.thumbs_up ?? 0}
+            </span>
+            <span className="inline-flex items-center gap-0.5 bg-red-100 text-red-700 text-xs font-bold px-1.5 py-0.5 rounded-full border border-red-300">
+              👎 {book.thumbs_down ?? 0}
+            </span>
+          </div>
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, DELETE, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -11,45 +11,19 @@ export async function onRequest(context) {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
   }
 
+  const id = params.id;
+
+  // GET — list all reads for this book
   if (request.method === 'GET') {
     try {
-      const id = params.id;
-
-      const book = await env.DB.prepare(`
-        SELECT
-          b.*,
-          COALESCE(SUM(CASE WHEN r.thumbs = 'up' THEN 1 ELSE 0 END), 0)   AS thumbs_up,
-          COALESCE(SUM(CASE WHEN r.thumbs = 'down' THEN 1 ELSE 0 END), 0) AS thumbs_down,
-          ROUND(AVG(CASE WHEN r.stars IS NOT NULL THEN r.stars END), 1)    AS avg_stars,
-          COUNT(CASE WHEN r.stars IS NOT NULL THEN 1 END)                  AS star_count
-        FROM books b
-        LEFT JOIN ratings r ON b.id = r.book_id
-        WHERE b.id = ?
-        GROUP BY b.id
-      `).bind(id).first();
-
-      if (!book) {
-        return new Response(JSON.stringify({ error: 'Book not found' }), {
-          status: 404,
-          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
-        });
-      }
-
-      const { results: comments } = await env.DB.prepare(`
-        SELECT id, thumbs, stars, comment, created_at
-        FROM ratings
-        WHERE book_id = ? AND (comment IS NOT NULL OR thumbs IS NOT NULL)
-        ORDER BY created_at DESC
-      `).bind(id).all();
-
-      const { results: reads } = await env.DB.prepare(`
+      const { results } = await env.DB.prepare(`
         SELECT id, read_at, created_at
         FROM read_log
         WHERE book_id = ?
         ORDER BY read_at DESC
       `).bind(id).all();
 
-      return new Response(JSON.stringify({ ...book, comments, reads }), {
+      return new Response(JSON.stringify(results), {
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     } catch (err) {
@@ -60,9 +34,9 @@ export async function onRequest(context) {
     }
   }
 
-  if (request.method === 'DELETE') {
+  // POST — log a new read
+  if (request.method === 'POST') {
     try {
-      const id = params.id;
       const book = await env.DB.prepare('SELECT id FROM books WHERE id = ?').bind(id).first();
       if (!book) {
         return new Response(JSON.stringify({ error: 'Book not found' }), {
@@ -70,8 +44,19 @@ export async function onRequest(context) {
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         });
       }
-      await env.DB.prepare('DELETE FROM books WHERE id = ?').bind(id).run();
-      return new Response(JSON.stringify({ success: true }), {
+
+      const body = await request.json().catch(() => ({}));
+      // read_at defaults to now if not provided; client sends ISO string
+      const readAt = body.read_at || new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+      const entry = await env.DB.prepare(`
+        INSERT INTO read_log (book_id, read_at)
+        VALUES (?, ?)
+        RETURNING *
+      `).bind(id, readAt).first();
+
+      return new Response(JSON.stringify(entry), {
+        status: 201,
         headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
       });
     } catch (err) {

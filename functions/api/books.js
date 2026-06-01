@@ -25,8 +25,10 @@ export async function onRequest(context) {
       const { results } = await env.DB.prepare(`
         SELECT
           b.*,
-          COALESCE(SUM(CASE WHEN r.thumbs = 'up' THEN 1 ELSE 0 END), 0) AS thumbs_up,
-          COALESCE(SUM(CASE WHEN r.thumbs = 'down' THEN 1 ELSE 0 END), 0) AS thumbs_down
+          COALESCE(SUM(CASE WHEN r.thumbs = 'up' THEN 1 ELSE 0 END), 0)   AS thumbs_up,
+          COALESCE(SUM(CASE WHEN r.thumbs = 'down' THEN 1 ELSE 0 END), 0) AS thumbs_down,
+          ROUND(AVG(CASE WHEN r.stars IS NOT NULL THEN r.stars END), 1)    AS avg_stars,
+          COUNT(CASE WHEN r.stars IS NOT NULL THEN 1 END)                  AS star_count
         FROM books b
         LEFT JOIN ratings r ON b.id = r.book_id
         GROUP BY b.id

@@ -15,16 +15,28 @@ export async function onRequest(context) {
     try {
       const id = params.id;
       const body = await request.json();
-      const { thumbs, comment } = body;
+      const { thumbs, stars, comment } = body;
 
-      if (!thumbs || !['up', 'down'].includes(thumbs)) {
+      // Validate: need at least one of stars or thumbs
+      if (!stars && !thumbs) {
+        return new Response(JSON.stringify({ error: 'Provide stars (1-5) or thumbs ("up"/"down")' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+      }
+      if (thumbs && !['up', 'down'].includes(thumbs)) {
         return new Response(JSON.stringify({ error: 'thumbs must be "up" or "down"' }), {
           status: 400,
           headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
         });
       }
+      if (stars && (stars < 1 || stars > 5 || !Number.isInteger(Number(stars)))) {
+        return new Response(JSON.stringify({ error: 'stars must be 1–5' }), {
+          status: 400,
+          headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' },
+        });
+      }
 
-      // Verify book exists
       const book = await env.DB.prepare('SELECT id FROM books WHERE id = ?').bind(id).first();
       if (!book) {
         return new Response(JSON.stringify({ error: 'Book not found' }), {
@@ -34,17 +46,18 @@ export async function onRequest(context) {
       }
 
       await env.DB.prepare(`
-        INSERT INTO ratings (book_id, thumbs, comment)
-        VALUES (?, ?, ?)
-      `).bind(id, thumbs, comment || null).run();
+        INSERT INTO ratings (book_id, thumbs, stars, comment)
+        VALUES (?, ?, ?, ?)
+      `).bind(id, thumbs || null, stars ? Number(stars) : null, comment || null).run();
 
-      // Return updated counts
+      // Return updated counts + avg stars
       const counts = await env.DB.prepare(`
         SELECT
-          COALESCE(SUM(CASE WHEN thumbs = 'up' THEN 1 ELSE 0 END), 0) AS thumbs_up,
-          COALESCE(SUM(CASE WHEN thumbs = 'down' THEN 1 ELSE 0 END), 0) AS thumbs_down
-        FROM ratings
-        WHERE book_id = ?
+          COALESCE(SUM(CASE WHEN thumbs = 'up' THEN 1 ELSE 0 END), 0)   AS thumbs_up,
+          COALESCE(SUM(CASE WHEN thumbs = 'down' THEN 1 ELSE 0 END), 0) AS thumbs_down,
+          ROUND(AVG(CASE WHEN stars IS NOT NULL THEN stars END), 1)      AS avg_stars,
+          COUNT(CASE WHEN stars IS NOT NULL THEN 1 END)                  AS star_count
+        FROM ratings WHERE book_id = ?
       `).bind(id).first();
 
       return new Response(JSON.stringify(counts), {
